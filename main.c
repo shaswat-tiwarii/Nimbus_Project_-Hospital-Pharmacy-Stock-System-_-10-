@@ -203,3 +203,228 @@ static void delete_expired() {
     else
         puts("Nothing to remove.");
 }
+
+static void list_all_items() {
+    if (!invCount) {
+        puts("Nothing in storage.");
+        return;
+    }
+
+    int d, m, y;
+    today(&d, &m, &y);
+
+    printf("%-6s %-20s %-10s %-8s %-8s %-12s\n",
+           "ID","Name","Expires","Price","Stock","Status");
+
+    for (int i = 0; i < invCount; i++) {
+        Record *r = &invList[i];
+        int cmp = compare_dates(r->dd, r->mm, r->yy, d, m, y);
+        const char *info =
+            (cmp < 0) ? "EXPIRED" :
+            (cmp == 0 ? "Expires Today" : "Valid");
+
+        printf("%-6d %-20s %02d-%02d-%04d %-8.2f %-8d %-12s\n",
+               r->code, r->title, r->dd, r->mm, r->yy,
+               r->unit_cost, r->onhand, info);
+    }
+}
+
+static void show_expired_items() {
+    int d, m, y;
+    today(&d, &m, &y);
+
+    int foundAny = 0;
+    for (int i = 0; i < invCount; i++) {
+        Record *r = &invList[i];
+        if (compare_dates(r->dd, r->mm, r->yy, d, m, y) < 0) {
+            if (!foundAny) {
+                puts("Expired goods:");
+                printf("%-6s %-20s %-12s %-6s\n",
+                       "ID","Name","Expiry","Qty");
+            }
+            printf("%-6d %-20s %02d-%02d-%04d %-6d\n",
+                   r->code, r->title, r->dd, r->mm, r->yy, r->onhand);
+            foundAny = 1;
+        }
+    }
+
+    if (!foundAny)
+        puts("No expired records.");
+}
+
+static void add_stock() {
+    char buf[128];
+    puts("Item ID to restock:");
+    get_line(buf, sizeof(buf));
+
+    int code;
+    if (!to_int(buf, &code)) {
+        puts("Not valid.");
+        return;
+    }
+
+    int idx = locate(code);
+    if (idx < 0) {
+        puts("ID not found.");
+        return;
+    }
+
+    puts("Add how many?");
+    get_line(buf, sizeof(buf));
+
+    int amt;
+    if (!to_int(buf, &amt) || amt <= 0) {
+        puts("Bad amount.");
+        return;
+    }
+
+    invList[idx].onhand += amt;
+    printf("Stock updated: %d units now available.\n",
+           invList[idx].onhand);
+}
+
+static void buy_item() {
+    char buf[128];
+    puts("ID to purchase:");
+    get_line(buf, sizeof(buf));
+
+    int code;
+    if (!to_int(buf, &code)) {
+        puts("Not a number.");
+        return;
+    }
+
+    int idx = locate(code);
+    if (idx < 0) {
+        puts("No item with that ID.");
+        return;
+    }
+
+    puts("Quantity:");
+    get_line(buf, sizeof(buf));
+
+    int q;
+    if (!to_int(buf, &q) || q <= 0) {
+        puts("Invalid qty.");
+        return;
+    }
+
+    if (q > invList[idx].onhand) {
+        printf("Only %d available.\n", invList[idx].onhand);
+        return;
+    }
+
+    invList[idx].onhand -= q;
+    double bill = q * invList[idx].unit_cost;
+
+    printf("Total: %.2f. Remaining stock: %d\n",
+           bill, invList[idx].onhand);
+}
+
+static void write_file() {
+    FILE *fp = fopen(DATA_FILE, "wb");
+    if (!fp) {
+        perror("Cannot open file");
+        return;
+    }
+
+    fwrite(&invCount, sizeof(invCount), 1, fp);
+
+    for (int i = 0; i < invCount; i++)
+        fwrite(&invList[i], sizeof(Record), 1, fp);
+
+    fclose(fp);
+    puts("Data saved.");
+}
+
+static void read_file() {
+    FILE *fp = fopen(DATA_FILE, "rb");
+    if (!fp) {
+        puts("No saved file present.");
+        return;
+    }
+
+    int n = 0;
+    if (fread(&n, sizeof(n), 1, fp) != 1) {
+        puts("Could not read header.");
+        fclose(fp);
+        return;
+    }
+
+    if (n < 0 || n > MAX_STOCK) {
+        puts("Bad file data.");
+        fclose(fp);
+        return;
+    }
+
+    for (int i = 0; i < n; i++) {
+        if (fread(&invList[i], sizeof(Record), 1, fp) != 1) {
+            puts("Error reading records.");
+            fclose(fp);
+            return;
+        }
+    }
+
+    invCount = n;
+    fclose(fp);
+    printf("Loaded %d item(s).\n", invCount);
+}
+
+static void load_demo() {
+    Record a = {101,"Ibuprofen",10,10,2026,8.5,40};
+    Record b = {102,"Cefuroxime",5,3,2025,120,15};
+    Record c = {103,"Adrenaline",20,12,2027,250,5};
+
+    invList[0] = a;
+    invList[1] = b;
+    invList[2] = c;
+
+    invCount = 3;
+    puts("Loaded sample items.");
+}
+
+static void menu() {
+    puts("\n*** Pharmacy Stock Menu ***");
+    puts("1. Add Item");
+    puts("2. List Items");
+    puts("3. Show Expired");
+    puts("4. Delete Expired");
+    puts("5. Restock");
+    puts("6. Purchase");
+    puts("7. Edit Record");
+    puts("8. Save");
+    puts("9. Load");
+    puts("10. Demo Data");
+    puts("0. Quit");
+    printf("Pick> ");
+}
+
+int main() {
+    char buf[64];
+    int choice = -1;
+
+    for (;;) {
+        menu();
+        get_line(buf, sizeof(buf));
+
+        if (!to_int(buf, &choice)) {
+            puts("Enter a number.");
+            continue;
+        }
+
+        switch (choice) {
+            case 1:  add_record(); break;
+            case 2:  list_all_items(); break;
+            case 3:  show_expired_items(); break;
+            case 4:  delete_expired(); break;
+            case 5:  add_stock(); break;
+            case 6:  buy_item(); break;
+            case 7:  edit_record(); break;
+            case 8:  write_file(); break;
+            case 9:  read_file(); break;
+            case 10: load_demo(); break;
+            case 0:  puts("Bye."); return 0;
+            default: puts("Unknown option."); break;
+        }
+    }
+}
